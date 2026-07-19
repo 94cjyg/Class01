@@ -1,0 +1,18 @@
+{
+    "admin": {
+        "username": "admin",
+        "password_hash": "scrypt:32768:8:1$1XIEu1B2nqINqV8v$57d521a8cd824da44b2c6ab659698bf2ef840d3354de476171e5fecb93aecf4e0d5e6bc62f7abecb2be7e54bab512766aa7b8380a4af24fdbad5118e1f325794",
+        "role": "admin",
+        "email": "admin@example.com",
+        "phone": "13800138000",
+        "balance": 99999
+    },
+    "alice": {
+        "username": "alice",
+        "password_hash": "scrypt:32768:8:1$u6vnByKC6HzxzsOf$b00947fd2101573d5b9a591e543af5e9226d5e543bd7c3474eb8e365e6130e04d1a34e857acee7834caad3a40b0d95c4771f303173fef70d47798756ad81bed1",
+        "role": "user",
+        "email": "alice@example.com",
+        "phone": "13900139001",
+        "balance": 100
+    }
+}
