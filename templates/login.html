@@ -3,6 +3,9 @@
 {% block content %}
 <div class="card login-card">
     <h2>用户登录</h2>
+    {% if registered %}
+    <div class="success-message">注册成功，请登录</div>
+    {% endif %}
     {% if error %}
     <div class="error-message">{{ error }}</div>
     {% endif %}

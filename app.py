@@ -1,10 +1,11 @@
 import os
 import json
+import sqlite3
 import secrets
 import time
 from collections import defaultdict
 from flask import Flask, render_template, request, redirect, session, url_for
-from werkzeug.security import check_password_hash
+from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
@@ -99,25 +100,95 @@ def load_users():
 USERS = load_users()
 
 
-@app.route("/")
-def index():
-    username = session.get("username")
-    user_info = None
-    if username and username in USERS:
+def get_user_info(username):
+    """从 USERS 或 SQLite 获取用户信息，优先 USERS"""
+    if username in USERS:
         user = USERS[username]
-        user_info = {
+        return {
             "username": user["username"],
             "role": user["role"],
             "email": user["email"],
             "phone": user["phone"],
             "balance": user["balance"]
         }
-    return render_template("index.html", username=username, user=user_info)
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("SELECT * FROM users WHERE username = ?", (username,))
+        row = c.fetchone()
+        conn.close()
+        if row:
+            return {
+                "username": row["username"],
+                "role": "user",
+                "email": row["email"] or "",
+                "phone": row["phone"] or "",
+                "balance": 0
+            }
+    except Exception:
+        pass
+    return None
+
+
+def get_db():
+    os.makedirs("data", exist_ok=True)
+    conn = sqlite3.connect("data/users.db")
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            email TEXT,
+            phone TEXT
+        )
+    """)
+    c.execute("INSERT OR IGNORE INTO users (username, password, email, phone) VALUES (?, ?, ?, ?)",
+              ("admin", generate_password_hash("admin123"), "admin@example.com", "13800138000"))
+    c.execute("INSERT OR IGNORE INTO users (username, password, email, phone) VALUES (?, ?, ?, ?)",
+              ("alice", generate_password_hash("alice2025"), "alice@example.com", "13900139001"))
+    conn.commit()
+    conn.close()
+
+
+init_db()
+
+
+@app.route("/")
+def index():
+    username = session.get("username")
+    user_info = None
+    search_results = None
+    keyword = request.args.get("keyword", "")
+
+    if username:
+        user_info = get_user_info(username)
+
+    if keyword:
+        conn = get_db()
+        c = conn.cursor()
+        like_pattern = f"%{keyword}%"
+        sql = "SELECT * FROM users WHERE username LIKE ? OR email LIKE ?"
+        print(f"[SQL] {sql}  params: ['%{keyword}%']")
+        c.execute(sql, (like_pattern, like_pattern))
+        rows = c.fetchall()
+        search_results = [dict(row) for row in rows]
+        conn.close()
+
+    return render_template("index.html", username=username, user=user_info,
+                           search_results=search_results, keyword=keyword)
 
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
     error = None
+    registered = request.args.get("registered")
     if request.method == "POST":
         username = request.form.get("username", "")
         password = request.form.get("password", "")
@@ -134,16 +205,56 @@ def login():
             session["username"] = username
             return redirect(url_for("index"))
         else:
+            # 回退到 SQLite 校验（新注册用户）
+            try:
+                conn = get_db()
+                c = conn.cursor()
+                c.execute("SELECT password FROM users WHERE username = ?", (username,))
+                row = c.fetchone()
+                conn.close()
+                if row and check_password_hash(row["password"], password):
+                    _record_success(username)
+                    session["username"] = username
+                    return redirect(url_for("index"))
+            except Exception:
+                pass
             _record_failure(ip, username)
             error = "用户名或密码错误"
 
-    return render_template("login.html", error=error)
+    return render_template("login.html", error=error, registered=registered)
 
 
 @app.route("/logout")
 def logout():
     session.clear()
     return redirect("/")
+
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if request.method == "POST":
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+        email = request.form.get("email", "")
+        phone = request.form.get("phone", "")
+
+        conn = get_db()
+        c = conn.cursor()
+        password_hash = generate_password_hash(password)
+        sql = "INSERT INTO users (username, password, email, phone) VALUES (?, ?, ?, ?)"
+        print(f"[SQL] {sql}  params: ['{username}', '{password_hash}', '{email}', '{phone}']")
+        c.execute(sql, (username, password_hash, email, phone))
+        conn.commit()
+        conn.close()
+        return redirect(url_for("login", registered=1))
+
+    return render_template("register.html")
+
+
+@app.route("/search")
+def search():
+    keyword = request.args.get("keyword", "")
+    return redirect(url_for("index", keyword=keyword))
 
 
 if __name__ == "__main__":

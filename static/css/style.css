@@ -207,3 +207,119 @@ body {
     margin-bottom: 16px;
     border: 1px solid #fdd;
 }
+
+/* === Success === */
+.success-message {
+    background: #f0fff4;
+    color: #27ae60;
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 14px;
+    margin-bottom: 16px;
+    border: 1px solid #b2e6c2;
+}
+
+/* === Search === */
+.search-form {
+    margin-bottom: 16px;
+}
+
+.search-group {
+    display: flex;
+    gap: 10px;
+}
+
+.search-input {
+    flex: 1;
+    padding: 10px 14px;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    font-size: 14px;
+    outline: none;
+}
+
+.search-input:focus {
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.btn-search {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    background: #667eea;
+    color: #fff;
+    transition: background 0.2s;
+}
+
+.btn-search:hover {
+    background: #5a6fd6;
+}
+
+.search-results h4 {
+    font-size: 14px;
+    color: #666;
+    margin-bottom: 12px;
+}
+
+.search-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+}
+
+.search-table th {
+    background: #f5f7fa;
+    padding: 10px 8px;
+    text-align: left;
+    font-weight: 600;
+    color: #555;
+    border-bottom: 2px solid #e0e0e0;
+}
+
+.search-table td {
+    padding: 10px 8px;
+    border-bottom: 1px solid #f0f0f0;
+    color: #333;
+}
+
+.search-table tbody tr:hover {
+    background: #f8f9ff;
+}
+
+.no-result {
+    text-align: center;
+    color: #999;
+    padding: 20px;
+    font-size: 14px;
+}
+
+/* === Register Card === */
+.register-card {
+    max-width: 400px;
+    margin: 0 auto;
+}
+
+.register-card h2 {
+    text-align: center;
+}
+
+.register-hint {
+    text-align: center;
+    margin-top: 16px;
+    font-size: 14px;
+    color: #888;
+}
+
+.register-hint a {
+    color: #667eea;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.register-hint a:hover {
+    text-decoration: underline;
+}
