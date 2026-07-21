@@ -1,6 +1,6 @@
 # 用户信息管理平台
 
-一个基于 Flask 的简易用户信息管理平台，支持用户注册、登录、信息展示、用户搜索、登出等功能，内置多层爆破防护机制和 SQL 注入防护。
+一个基于 Flask 的简易用户信息管理平台，支持用户注册、登录、信息展示、头像上传、用户搜索、登出等功能，内置多层爆破防护机制和 SQL 注入防护。
 
 > ⚠️ **安全练习项目** — 本系统设计上包含从脆弱到加固的完整过程，用于学习 Web 安全防护。
 
@@ -11,13 +11,16 @@
 - 📝 **用户注册** — 新用户自助注册，密码自动哈希存储
 - 🔐 **用户登录/登出** — 基于 Session 的认证，支持爆破防护
 - 👤 **用户信息展示** — 登录后查看个人资料
+- 🖼️ **头像上传** — 支持图片上传与在线预览
 - 🔍 **用户搜索** — 支持按用户名或邮箱搜索用户
+- 📋 **审计日志** — 记录登录、注册、搜索、上传等全部操作
 - 🛡️ **三层爆破防护**
   - **渐进式延迟** — 每次登录失败等待时间递增（0.3s × 失败次数）
   - **账户锁定** — 连续 5 次失败后锁定账户 5 分钟
   - **IP 封禁** — 同一 IP 累计 20 次失败后封禁 10 分钟
 - 🔑 **密码安全** — 密码使用 scrypt 算法哈希存储，永不回显
 - 🛡️ **SQL 注入防护** — 所有 SQL 查询使用参数化查询
+- 🛡️ **上传安全** — 扩展名白名单 + MIME 校验 + 魔数校验 + UUID 重命名 + 路径穿越防护
 - 📋 **外部配置** — 用户数据独立存放于 `users.json` 和 `users.db`，不硬编码在源码中
 
 ---
@@ -58,16 +61,19 @@ python3 app.py
 
 ```
 /opt/Class01/
-├── app.py            # Flask 主应用（路由 + 爆破防护 + SQL 注入防护）
+├── app.py            # Flask 主应用（路由 + 爆破防护 + 注入防护 + 审计日志）
 ├── users.json        # 预置用户数据（密码已哈希）
+├── audit.log         # 审计日志文件（自动生成，不提交 Git）
 ├── data/
 │   └── users.db      # SQLite 数据库（注册用户存储，自动生成，不提交 Git）
 ├── templates/
 │   ├── base.html     # 基础模板（导航栏）
 │   ├── login.html    # 登录页
 │   ├── register.html # 注册页
+│   ├── upload.html   # 头像上传页
 │   └── index.html    # 首页（用户信息展示 + 搜索功能）
 ├── static/
+│   ├── uploads/      # 上传文件存储（自动生成，不提交 Git）
 │   └── css/
 │       └── style.css # 蓝色渐变主题样式
 ├── .gitignore
@@ -86,6 +92,8 @@ python3 app.py
 | `/register` | GET | 注册页面 |
 | `/register` | POST | 提交注册（参数：username, password, email, phone） |
 | `/search` | GET | 搜索用户（参数：keyword），重定向至首页显示结果 |
+| `/upload` | GET | 上传头像页面 |
+| `/upload` | POST | 上传图片文件（参数：file，仅限图片格式） |
 | `/logout` | GET | 登出并清除 Session |
 
 ---
@@ -105,6 +113,11 @@ python3 app.py
 | HTML 注释泄露 | 注释写入 admin/admin123 | 已删除 |
 | **SQL 注入** | f-string 拼接 SQL 语句 | **参数化查询**（`?` 占位符） |
 | 无爆破防护 | 登录接口无频率限制 | 三层爆破防护（延迟 + 锁定 + 封禁） |
+| **无扩展名校验** | 可上传 `.php` 一句话木马 | 白名单仅允许图片扩展名 |
+| **无文件内容校验** | 改后缀即可绕过扩展名检查 | 读取 8 字节魔数验证真实类型 |
+| **原始文件名保留** | 攻击者可控制服务器文件名 | 32 位随机十六进制重命名 |
+| **路径穿越** | `../../../` 可写入任意目录 | `normpath` + 起始路径检查 |
+| **无审计日志** | 无法追踪攻击行为 | 全操作审计日志记录 |
 
 ### SQL 注入防护
 
@@ -119,6 +132,51 @@ like_pattern = f"%{keyword}%"
 sql = "SELECT * FROM users WHERE username LIKE ? OR email LIKE ?"
 c.execute(sql, (like_pattern, like_pattern))
 ```
+
+### 上传安全防护
+
+头像上传功能实施五层安全校验：
+
+```python
+# ① 扩展名白名单
+ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
+
+# ② MIME 类型检查
+if file.content_type not in ["image/jpeg", "image/png", ...]: ...
+
+# ③ 文件魔数校验（读文件头验证真实类型）
+MAGIC_NUMBERS = {b"\xff\xd8": "jpeg", b"\x89PNG\r\n": "png", ...}
+header = file.read(8)
+is_valid_image = any(header.startswith(magic) for magic in MAGIC_NUMBERS)
+
+# ④ UUID 重命名（防路径穿越 + 防覆盖）
+safe_filename = f"{secrets.token_hex(16)}{ext}"
+
+# ⑤ 路径前缀检查
+if not filepath.startswith(os.path.normpath(upload_dir)):
+    return render_template("upload.html", error="非法文件名")
+```
+
+### 审计日志
+
+所有敏感操作均记录日志，格式如下：
+
+```
+2026-07-21 16:49:53,022 |   127.0.0.1 | admin        | 登录成功     | USERS 验证
+2026-07-21 16:49:53,110 |   127.0.0.1 | admin        | 登出         |
+2026-07-21 16:49:53,714 |   127.0.0.1 | admin        | 上传拒绝     | 扩展名非法: shell.php
+2026-07-21 16:50:09,131 |   127.0.0.1 | admin        | 登录拦截     | 账户暂时锁定，请 298 秒后再试
+```
+
+| 操作 | 记录内容 |
+|:----|:---------|
+| 登录成功/失败 | 用户名、IP、验证来源、失败原因 |
+| 登录拦截 | 用户名、IP、拦截原因（锁定/封禁） |
+| 登出 | 用户名、IP |
+| 注册 | 用户名、IP、邮箱、手机 |
+| 搜索 | 用户名、IP、关键词 |
+| 上传成功 | 用户名、IP、原始文件名、存储名、文件大小 |
+| 上传拒绝 | 用户名、IP、拒绝原因、文件名 |
 
 ### 爆破防护配置
 

@@ -323,3 +323,65 @@ body {
 .register-hint a:hover {
     text-decoration: underline;
 }
+
+/* === Upload === */
+.upload-card {
+    max-width: 480px;
+    margin: 0 auto;
+}
+
+.upload-card h2 {
+    text-align: center;
+}
+
+.file-input {
+    width: 100%;
+    padding: 10px 0;
+    font-size: 14px;
+}
+
+.upload-preview {
+    text-align: center;
+    margin: 20px 0;
+}
+
+.preview-img {
+    max-width: 200px;
+    max-height: 200px;
+    border-radius: 12px;
+    border: 3px solid #eee;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    margin-bottom: 12px;
+}
+
+.upload-path {
+    font-size: 13px;
+    color: #888;
+    word-break: break-all;
+}
+
+.upload-path code {
+    background: #f5f7fa;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+}
+
+.btn-secondary {
+    background: #95a5a6;
+    color: #fff;
+}
+
+.btn-secondary:hover {
+    background: #7f8c8d;
+}
+
+.btn-upload {
+    background: #27ae60;
+    color: #fff;
+    margin-right: 10px;
+}
+
+.btn-upload:hover {
+    background: #219a52;
+}

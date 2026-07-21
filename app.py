@@ -3,12 +3,32 @@ import json
 import sqlite3
 import secrets
 import time
+import logging
+from datetime import datetime
 from collections import defaultdict
 from flask import Flask, render_template, request, redirect, session, url_for
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
+app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
+
+# === 审计日志 ===
+audit_logger = logging.getLogger("audit")
+audit_handler = logging.FileHandler(os.path.join(os.path.dirname(__file__), "audit.log"), encoding="utf-8")
+audit_handler.setFormatter(logging.Formatter("%(asctime)s | %(message)s"))
+audit_logger.addHandler(audit_handler)
+audit_logger.setLevel(logging.INFO)
+
+
+def audit(action, username, ip, detail=""):
+    """写入审计日志"""
+    audit_logger.info(f"{ip:>15s} | {username or '匿名':<12s} | {action:<12s} | {detail}")
+
+
+@app.errorhandler(413)
+def too_large(e):
+    return render_template("upload.html", error="文件过大，最大允许 16MB"), 413
 
 # === 爆破防护状态（内存） ===
 FAILED_ACCOUNTS = defaultdict(list)   # username -> [timestamp, ...]
@@ -171,6 +191,9 @@ def index():
         user_info = get_user_info(username)
 
     if keyword:
+        username = session.get("username", "匿名")
+        ip = request.remote_addr or "unknown"
+        audit("搜索", username, ip, f"keyword={keyword}")
         conn = get_db()
         c = conn.cursor()
         like_pattern = f"%{keyword}%"
@@ -199,10 +222,12 @@ def login():
         # 爆破防护检测
         blocked, msg = _check_blocked(ip, username)
         if blocked:
+            audit("登录拦截", username, ip, msg)
             error = msg
         elif username in USERS and check_password_hash(USERS[username]["password_hash"], password):
             _record_success(username)
             session["username"] = username
+            audit("登录成功", username, ip, "USERS 验证")
             return redirect(url_for("index"))
         else:
             # 回退到 SQLite 校验（新注册用户）
@@ -215,10 +240,12 @@ def login():
                 if row and check_password_hash(row["password"], password):
                     _record_success(username)
                     session["username"] = username
+                    audit("登录成功", username, ip, "SQLite 验证")
                     return redirect(url_for("index"))
             except Exception:
                 pass
             _record_failure(ip, username)
+            audit("登录失败", username, ip, "密码错误")
             error = "用户名或密码错误"
 
     return render_template("login.html", error=error, registered=registered)
@@ -226,7 +253,10 @@ def login():
 
 @app.route("/logout")
 def logout():
+    username = session.get("username", "未知")
+    ip = request.remote_addr or "unknown"
     session.clear()
+    audit("登出", username, ip, "")
     return redirect("/")
 
 
@@ -237,6 +267,7 @@ def register():
         password = request.form.get("password", "")
         email = request.form.get("email", "")
         phone = request.form.get("phone", "")
+        ip = request.remote_addr or "unknown"
 
         conn = get_db()
         c = conn.cursor()
@@ -246,6 +277,7 @@ def register():
         c.execute(sql, (username, password_hash, email, phone))
         conn.commit()
         conn.close()
+        audit("注册", username, ip, f"email={email} phone={phone}")
         return redirect(url_for("login", registered=1))
 
     return render_template("register.html")
@@ -254,7 +286,76 @@ def register():
 @app.route("/search")
 def search():
     keyword = request.args.get("keyword", "")
+    username = session.get("username", "匿名")
+    ip = request.remote_addr or "unknown"
+    audit("搜索", username, ip, f"keyword={keyword}")
     return redirect(url_for("index", keyword=keyword))
+
+
+@app.route("/upload", methods=["GET", "POST"])
+def upload():
+    if "username" not in session:
+        return redirect(url_for("login"))
+
+    username = session.get("username", "未知")
+    ip = request.remote_addr or "unknown"
+
+    if request.method == "POST":
+        if "file" not in request.files:
+            return render_template("upload.html", error="未选择文件")
+
+        file = request.files["file"]
+        if file.filename == "":
+            return render_template("upload.html", error="未选择文件")
+
+        original_filename = file.filename
+
+        # 检查文件扩展名
+        ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"}
+        ext = os.path.splitext(original_filename)[1].lower()
+        if ext not in ALLOWED_EXTENSIONS:
+            audit("上传拒绝", username, ip, f"扩展名非法: {original_filename}")
+            return render_template("upload.html", error="不支持的文件类型，仅允许图片文件（jpg/jpeg/png/gif/bmp/webp）")
+
+        # 检查 MIME 类型
+        if file.content_type not in ["image/jpeg", "image/png", "image/gif", "image/bmp", "image/webp"]:
+            audit("上传拒绝", username, ip, f"MIME非法: {file.content_type} ({original_filename})")
+            return render_template("upload.html", error="文件内容类型不合法，仅允许图片文件")
+
+        # 读取文件头进一步验证
+        file.seek(0)
+        header = file.read(8)
+        file.seek(0)
+        MAGIC_NUMBERS = {
+            b"\xff\xd8": "image/jpeg",
+            b"\x89PNG\r\n": "image/png",
+            b"GIF87a": "image/gif",
+            b"GIF89a": "image/gif",
+            b"BM": "image/bmp",
+            b"RIFF": "image/webp",
+        }
+        is_valid_image = any(header.startswith(magic) for magic in MAGIC_NUMBERS)
+        if not is_valid_image:
+            audit("上传拒绝", username, ip, f"魔数校验失败: {original_filename}")
+            return render_template("upload.html", error="文件内容不是有效的图片格式")
+
+        # 使用 UUID 重命名，防止路径穿越和覆盖
+        safe_filename = f"{secrets.token_hex(16)}{ext}"
+        upload_dir = os.path.join(app.root_path, "static/uploads")
+        os.makedirs(upload_dir, exist_ok=True)
+        filepath = os.path.normpath(os.path.join(upload_dir, safe_filename))
+
+        # 确保文件写入 uploads 目录内（防止路径穿越）
+        if not filepath.startswith(os.path.normpath(upload_dir)):
+            audit("上传拒绝", username, ip, f"路径穿越尝试: {original_filename}")
+            return render_template("upload.html", error="非法文件名")
+
+        file.save(filepath)
+        file_url = url_for("static", filename=f"uploads/{safe_filename}")
+        audit("上传成功", username, ip, f"{original_filename} → {safe_filename} ({os.path.getsize(filepath)} bytes)")
+        return render_template("upload.html", success=True, file_url=file_url, filename=safe_filename)
+
+    return render_template("upload.html")
 
 
 if __name__ == "__main__":
