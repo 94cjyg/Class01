@@ -385,3 +385,19 @@ body {
 .btn-upload:hover {
     background: #219a52;
 }
+
+.btn-profile {
+    background: #3498db;
+    color: #fff;
+    margin-right: 10px;
+}
+
+.btn-profile:hover {
+    background: #2980b9;
+}
+
+/* === Profile === */
+.recharge-form {
+    max-width: 320px;
+    margin: 0 auto;
+}

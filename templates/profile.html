@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}个人中心 - 用户管理系统{% endblock %}
+{% block content %}
+{% if error %}
+<div class="card">
+    <h2>个人中心</h2>
+    <p class="no-result">{{ error }}</p>
+    <div class="action-bar">
+        <a href="/" class="btn btn-primary">返回首页</a>
+    </div>
+</div>
+{% elif user %}
+<div class="card">
+    <h2>个人中心</h2>
+    <h3>用户信息</h3>
+    <table class="user-info-table">
+        <tr>
+            <td class="label">ID</td>
+            <td class="value">{{ user.id }}</td>
+        </tr>
+        <tr>
+            <td class="label">用户名</td>
+            <td class="value">{{ user.username }}</td>
+        </tr>
+        <tr>
+            <td class="label">邮箱</td>
+            <td class="value">{{ user.email }}</td>
+        </tr>
+        <tr>
+            <td class="label">手机</td>
+            <td class="value">{{ user.phone }}</td>
+        </tr>
+        <tr>
+            <td class="label">余额</td>
+            <td class="value">¥{{ user.balance }}</td>
+        </tr>
+        <tr>
+            <td class="label">角色</td>
+            <td class="value">{{ user.role }}</td>
+        </tr>
+    </table>
+</div>
+
+<div class="card">
+    <h3>账户充值</h3>
+    <form method="post" action="/recharge" class="recharge-form">
+        <input type="hidden" name="user_id" value="{{ user.id }}">
+        <div class="form-group">
+            <label for="amount">充值金额</label>
+            <input type="number" id="amount" name="amount" step="1" placeholder="请输入充值金额" required>
+        </div>
+        <button type="submit" class="btn btn-primary">充 值</button>
+    </form>
+</div>
+
+<div class="action-bar">
+    <a href="/" class="btn btn-secondary">返回首页</a>
+</div>
+{% else %}
+<div class="card welcome-card">
+    <h2>请先登录</h2>
+    <p>您尚未登录，请先登录以查看个人中心。</p>
+    <a href="/login" class="btn btn-primary">前往登录</a>
+</div>
+{% endif %}
+{% endblock %}

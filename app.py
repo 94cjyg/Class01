@@ -120,6 +120,25 @@ def load_users():
 USERS = load_users()
 
 
+def get_user_id(username):
+    """根据用户名查询 user_id"""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT id FROM users WHERE username = ?", (username,))
+    row = c.fetchone()
+    conn.close()
+    return row["id"] if row else 1
+
+
+@app.context_processor
+def inject_user_id():
+    """向所有模板注入当前登录用户的 user_id"""
+    uid = None
+    if "username" in session:
+        uid = get_user_id(session["username"])
+    return dict(current_user_id=uid)
+
+
 def get_user_info(username):
     """从 USERS 或 SQLite 获取用户信息，优先 USERS"""
     if username in USERS:
@@ -143,7 +162,7 @@ def get_user_info(username):
                 "role": "user",
                 "email": row["email"] or "",
                 "phone": row["phone"] or "",
-                "balance": 0
+                "balance": row["balance"] if row["balance"] is not None else 0
             }
     except Exception:
         pass
@@ -166,13 +185,19 @@ def init_db():
             username TEXT UNIQUE NOT NULL,
             password TEXT NOT NULL,
             email TEXT,
-            phone TEXT
+            phone TEXT,
+            balance INTEGER DEFAULT 0
         )
     """)
-    c.execute("INSERT OR IGNORE INTO users (username, password, email, phone) VALUES (?, ?, ?, ?)",
-              ("admin", generate_password_hash("admin123"), "admin@example.com", "13800138000"))
-    c.execute("INSERT OR IGNORE INTO users (username, password, email, phone) VALUES (?, ?, ?, ?)",
-              ("alice", generate_password_hash("alice2025"), "alice@example.com", "13900139001"))
+    # 兼容旧表：如果没有 balance 列则添加
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN balance INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # 列已存在
+    c.execute("INSERT OR IGNORE INTO users (username, password, email, phone, balance) VALUES (?, ?, ?, ?, ?)",
+              ("admin", generate_password_hash("admin123"), "admin@example.com", "13800138000", 99999))
+    c.execute("INSERT OR IGNORE INTO users (username, password, email, phone, balance) VALUES (?, ?, ?, ?, ?)",
+              ("alice", generate_password_hash("alice2025"), "alice@example.com", "13900139001", 100))
     conn.commit()
     conn.close()
 
@@ -272,7 +297,7 @@ def register():
         conn = get_db()
         c = conn.cursor()
         password_hash = generate_password_hash(password)
-        sql = "INSERT INTO users (username, password, email, phone) VALUES (?, ?, ?, ?)"
+        sql = "INSERT INTO users (username, password, email, phone, balance) VALUES (?, ?, ?, ?, 0)"
         print(f"[SQL] {sql}  params: ['{username}', '{password_hash}', '{email}', '{phone}']")
         c.execute(sql, (username, password_hash, email, phone))
         conn.commit()
@@ -356,6 +381,126 @@ def upload():
         return render_template("upload.html", success=True, file_url=file_url, filename=safe_filename)
 
     return render_template("upload.html")
+
+
+def get_user_by_id(user_id):
+    """根据 user_id 从数据源查询用户完整信息"""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+    row = c.fetchone()
+    conn.close()
+    if not row:
+        return None
+    username = row["username"]
+    # USERS 字典中的用户优先取 balance
+    if username in USERS:
+        user = USERS[username]
+        return {
+            "id": row["id"],
+            "username": username,
+            "email": row["email"] or user.get("email", ""),
+            "phone": row["phone"] or user.get("phone", ""),
+            "balance": user.get("balance", 0),
+            "role": user.get("role", "user")
+        }
+    return {
+        "id": row["id"],
+        "username": username,
+        "email": row["email"] or "",
+        "phone": row["phone"] or "",
+        "balance": row["balance"] if row["balance"] is not None else 0,
+        "role": "user"
+    }
+
+
+@app.route("/profile")
+def profile():
+    if "username" not in session:
+        return redirect(url_for("login"))
+
+    user_id = request.args.get("user_id")
+    if not user_id:
+        return redirect(url_for("index"))
+    try:
+        user_id = int(user_id)
+    except ValueError:
+        return redirect(url_for("index"))
+
+    username = session["username"]
+
+    # 验证是否查看自己的资料
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT username FROM users WHERE id = ?", (user_id,))
+    row = c.fetchone()
+    conn.close()
+    if not row or row["username"] != username:
+        return render_template("profile.html", error="无权查看其他用户的资料", user=None)
+
+    user_info = get_user_by_id(user_id)
+    if not user_info:
+        return render_template("profile.html", error="用户不存在", user=None)
+
+    return render_template("profile.html", user=user_info)
+
+
+MAX_RECHARGE = 10000000  # 单次充值上限
+
+
+@app.route("/recharge", methods=["POST"])
+def recharge():
+    if "username" not in session:
+        return redirect(url_for("login"))
+
+    user_id = request.form.get("user_id")
+    amount = request.form.get("amount")
+    login_user = session["username"]
+    ip = request.remote_addr or "unknown"
+
+    try:
+        user_id = int(user_id)
+        amount = int(amount)
+    except (ValueError, TypeError):
+        return redirect(url_for("index"))
+
+    # 负数或零校验
+    if amount <= 0:
+        return redirect(url_for("profile", user_id=user_id))
+
+    # 金额上限校验
+    if amount > MAX_RECHARGE:
+        return redirect(url_for("profile", user_id=user_id))
+
+    # 从 SQLite 查询目标用户
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT username FROM users WHERE id = ?", (user_id,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        return redirect(url_for("index"))
+
+    target_username = row["username"]
+
+    # 只能给自己充值
+    if login_user != target_username:
+        conn.close()
+        return redirect(url_for("profile", user_id=user_id))
+
+    # USERS 字典和 SQLite 同步更新
+    if target_username in USERS:
+        USERS[target_username]["balance"] = USERS[target_username].get("balance", 0) + amount
+        # 同步到 SQLite
+        c.execute("UPDATE users SET balance = COALESCE(balance, 0) + ? WHERE id = ?", (amount, user_id))
+    else:
+        c.execute("UPDATE users SET balance = COALESCE(balance, 0) + ? WHERE id = ?", (amount, user_id))
+
+    conn.commit()
+    conn.close()
+
+    audit("充值", login_user, ip, f"user_id={user_id} amount={amount}")
+    return redirect(url_for("profile", user_id=user_id))
 
 
 if __name__ == "__main__":
