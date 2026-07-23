@@ -503,5 +503,28 @@ def recharge():
     return redirect(url_for("profile", user_id=user_id))
 
 
+@app.route("/page")
+def page():
+    name = request.args.get("name", "")
+    if not name:
+        return redirect(url_for("index"))
+
+    # 白名单机制 — 只允许预定义的页面名称
+    ALLOWED_PAGES = {"help"}
+
+    if name not in ALLOWED_PAGES:
+        page_content = "<p style='color:#999;text-align:center;padding:40px;'>页面不存在</p>"
+    else:
+        page_path = os.path.join("pages", f"{name}.html")
+        try:
+            with open(page_path, "r", encoding="utf-8") as f:
+                page_content = f.read()
+        except Exception:
+            page_content = "<p style='color:#999;text-align:center;padding:40px;'>页面不存在</p>"
+
+    username = session.get("username")
+    return render_template("index.html", username=username, page_content=page_content)
+
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)

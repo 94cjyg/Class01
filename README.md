@@ -14,6 +14,7 @@
 - 💰 **账户充值** — 安全受限的充值功能（正数金额、仅限自己、有上限）
 - 🖼️ **头像上传** — 支持图片上传与在线预览
 - 🔍 **用户搜索** — 支持按用户名或邮箱搜索用户
+- 📄 **动态页面** — 动态加载帮助中心等静态页面（白名单防护）
 - 📋 **审计日志** — 记录登录、注册、搜索、上传、充值等全部操作
 - 🛡️ **三层爆破防护**
   - **渐进式延迟** — 每次登录失败等待时间递增（0.3s × 失败次数）
@@ -68,6 +69,8 @@ python3 app.py
 ├── audit.log         # 审计日志文件（自动生成，不提交 Git）
 ├── data/
 │   └── users.db      # SQLite 数据库（注册用户存储，自动生成，不提交 Git）
+├── pages/
+│   └── help.html      # 帮助中心页面（白名单可控）
 ├── templates/
 │   ├── base.html     # 基础模板（导航栏）
 │   ├── login.html    # 登录页
@@ -99,6 +102,7 @@ python3 app.py
 | `/search` | GET | 搜索用户（参数：keyword），重定向至首页显示结果 |
 | `/upload` | GET | 上传头像页面 |
 | `/upload` | POST | 上传图片文件（参数：file，仅限图片格式） |
+| `/page` | GET | 动态页面加载（参数：name=help，白名单限制） |
 | `/logout` | GET | 登出并清除 Session |
 
 ---
@@ -130,6 +134,7 @@ python3 app.py
 | 19 | **负金额扣款** | 充负数可扣减任意用户余额 | amount <= 0 拒绝 | 🔴 |
 | 20 | **充值无上限** | 可充任意大金额 | MAX_RECHARGE 上限校验 | 🟠 |
 | 21 | **内存数据不同步** | USERS 修改不写入 SQLite | 双数据源同步更新 | 🟠 |
+| 22 | **文件包含（LFI）** | 用户输入直接拼接入文件路径 | 白名单机制（仅允许预定义页面） | 🔴 |
 
 ### SQL 注入防护
 
@@ -186,6 +191,24 @@ if not filepath.startswith(os.path.normpath(upload_dir)):
   ✅ 上限校验 → 单次不超过 MAX_RECHARGE
   ✅ 数据同步 → USERS + SQLite 同时更新
 ```
+
+### 文件包含（LFI）防护
+
+动态页面加载功能曾存在严重的路径遍历漏洞，修复后实施白名单机制防止任意文件读取：
+
+```python
+# ❌ 修复前：用户输入直接拼接入路径，可路径穿越读取任意文件
+page_path = os.path.join("pages", name)      # name=../app.py → 读取源码
+
+# ✅ 修复后：白名单机制，只允许预定义页面
+ALLOWED_PAGES = {"help"}                      # 只允许 help
+if name not in ALLOWED_PAGES:                 # 不在白名单直接拒绝
+    page_content = "页面不存在"
+page_path = os.path.join("pages", f"{name}.html")  # 路径完全由服务端控制
+```
+
+修复前攻击者可通过 `../` 穿越、绝对路径绕过、URL编码绕过等方式读取服务器任意文件（源码、配置、系统文件），修复后白名单一刀切死所有绕过方式。
+
 
 ### 审计日志
 

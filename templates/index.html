@@ -1,7 +1,15 @@
 {% extends "base.html" %}
 {% block title %}首页 - 用户管理系统{% endblock %}
 {% block content %}
-{% if username %}
+{% if page_content %}
+<div class="card page-content-card">
+    {{ page_content|safe }}
+</div>
+<div class="action-bar">
+    <a href="/" class="btn btn-primary">返回首页</a>
+</div>
+
+{% elif username %}
 <div class="card">
     <h2>欢迎回来，{{ username }}！</h2>
     <h3>用户信息</h3>
@@ -30,6 +38,7 @@
     <div class="action-bar">
         <a href="/profile?user_id={{ current_user_id }}" class="btn btn-profile">个人中心</a>
         <a href="/upload" class="btn btn-upload">上传头像</a>
+        <a href="/page?name=help" class="btn btn-help">帮助中心</a>
         <a href="/logout" class="btn btn-danger">退出登录</a>
     </div>
 </div>

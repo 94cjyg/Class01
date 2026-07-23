@@ -396,6 +396,46 @@ body {
     background: #2980b9;
 }
 
+.btn-help {
+    background: #f39c12;
+    color: #fff;
+    margin-right: 10px;
+}
+
+.btn-help:hover {
+    background: #e67e22;
+}
+
+/* === Page Content === */
+.page-content-card {
+    max-width: 680px;
+    margin: 0 auto;
+}
+
+.page-content-card h2 {
+    color: #333;
+}
+
+.page-content-card h3 {
+    font-size: 15px;
+    color: #555;
+    margin-top: 20px;
+    margin-bottom: 8px;
+}
+
+.page-content-card p {
+    font-size: 14px;
+    line-height: 1.8;
+    color: #666;
+    margin-bottom: 12px;
+}
+
+.page-content-card hr {
+    border: none;
+    border-top: 1px solid #eee;
+    margin: 20px 0;
+}
+
 /* === Profile === */
 .recharge-form {
     max-width: 320px;
