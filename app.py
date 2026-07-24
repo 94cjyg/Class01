@@ -4,6 +4,7 @@ import sqlite3
 import secrets
 import time
 import logging
+import functools
 from datetime import datetime
 from collections import defaultdict
 from flask import Flask, render_template, request, redirect, session, url_for
@@ -12,6 +13,25 @@ from werkzeug.security import generate_password_hash, check_password_hash
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY") or secrets.token_hex(32)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+
+
+# === CSRF Token 生成 ===
+@app.before_request
+def ensure_csrf_token():
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_hex(32)
+
+
+def csrf_required(f):
+    """CSRF Token 验证装饰器"""
+    @functools.wraps(f)
+    def decorated(*args, **kwargs):
+        token = request.form.get("csrf_token", "")
+        if not token or token != session.get("csrf_token", ""):
+            return "CSRF 验证失败，请刷新页面后重试", 403
+        return f(*args, **kwargs)
+    return decorated
 
 # === 审计日志 ===
 audit_logger = logging.getLogger("audit")
@@ -326,6 +346,11 @@ def upload():
     ip = request.remote_addr or "unknown"
 
     if request.method == "POST":
+        # CSRF 校验
+        token = request.form.get("csrf_token", "")
+        if not token or token != session.get("csrf_token", ""):
+            return render_template("upload.html", error="CSRF 验证失败"), 403
+
         if "file" not in request.files:
             return render_template("upload.html", error="未选择文件")
 
@@ -449,6 +474,7 @@ MAX_RECHARGE = 10000000  # 单次充值上限
 
 
 @app.route("/recharge", methods=["POST"])
+@csrf_required
 def recharge():
     if "username" not in session:
         return redirect(url_for("login"))
@@ -524,6 +550,89 @@ def page():
 
     username = session.get("username")
     return render_template("index.html", username=username, page_content=page_content)
+
+
+@app.route("/change-password", methods=["POST"])
+@csrf_required
+def change_password():
+    if "username" not in session:
+        return redirect(url_for("login"))
+
+    login_user = session["username"]
+    username = request.form.get("username", "")
+    old_password = request.form.get("old_password", "")
+    new_password = request.form.get("new_password", "")
+    confirm_password = request.form.get("confirm_password", "")
+    ip = request.remote_addr or "unknown"
+
+    if not username or not new_password:
+        return redirect(url_for("profile", user_id=1))
+
+    # 两次新密码必须一致
+    if new_password != confirm_password:
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("SELECT id FROM users WHERE username = ?", (username,))
+        row = c.fetchone()
+        conn.close()
+        return render_template("profile.html", user=get_user_by_id(row["id"] if row else None), error="两次输入的新密码不一致")
+
+    # 只能修改自己的密码
+    if login_user != username:
+        audit("修改密码被拒", login_user, ip, f"企图修改{username}的密码")
+        return redirect(url_for("index"))
+
+    # 验证原密码
+    password_valid = False
+    if username in USERS:
+        password_valid = check_password_hash(USERS[username]["password_hash"], old_password)
+    else:
+        try:
+            conn = get_db()
+            c = conn.cursor()
+            c.execute("SELECT password FROM users WHERE username = ?", (username,))
+            row = c.fetchone()
+            conn.close()
+            if row:
+                password_valid = check_password_hash(row["password"], old_password)
+        except Exception:
+            pass
+
+    if not password_valid:
+        audit("修改密码失败", login_user, ip, "原密码错误")
+        # 需要传递错误信息到 profile 页面
+        conn = get_db()
+        c = conn.cursor()
+        c.execute("SELECT id FROM users WHERE username = ?", (username,))
+        row = c.fetchone()
+        conn.close()
+        return render_template("profile.html", user=get_user_by_id(row["id"] if row else None), error="原密码错误")
+
+    password_hash = generate_password_hash(new_password)
+
+    # 更新 USERS 字典（内存）
+    if username in USERS:
+        USERS[username]["password_hash"] = password_hash
+
+    # 更新 SQLite 数据库
+    conn = get_db()
+    c = conn.cursor()
+    c.execute("SELECT id FROM users WHERE username = ?", (username,))
+    row = c.fetchone()
+
+    if row:
+        c.execute("UPDATE users SET password = ? WHERE username = ?", (password_hash, username))
+        target_id = row["id"]
+    else:
+        c.execute("INSERT INTO users (username, password, email, phone, balance) VALUES (?, ?, '', '', 0)",
+                  (username, password_hash))
+        target_id = c.lastrowid
+
+    conn.commit()
+    conn.close()
+
+    audit("修改密码成功", login_user, ip, "")
+    return redirect(url_for("profile", user_id=target_id))
 
 
 if __name__ == "__main__":

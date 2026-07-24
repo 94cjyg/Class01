@@ -11,6 +11,7 @@
 - 📝 **用户注册** — 新用户自助注册，密码自动哈希存储
 - 🔐 **用户登录/登出** — 基于 Session 的认证，支持爆破防护
 - 👤 **个人中心** — 查看个人资料（邮箱、手机、余额、角色）
+- 🔑 **密码修改** — 需验证原密码 + CSRF Token 防护
 - 💰 **账户充值** — 安全受限的充值功能（正数金额、仅限自己、有上限）
 - 🖼️ **头像上传** — 支持图片上传与在线预览
 - 🔍 **用户搜索** — 支持按用户名或邮箱搜索用户
@@ -104,6 +105,7 @@ python3 app.py
 | `/upload` | POST | 上传图片文件（参数：file，仅限图片格式） |
 | `/page` | GET | 动态页面加载（参数：name=help，白名单限制） |
 | `/logout` | GET | 登出并清除 Session |
+| `/change-password` | POST | 修改密码（参数：csrf_token, username, old_password, new_password, confirm_password） |
 
 ---
 
@@ -135,6 +137,9 @@ python3 app.py
 | 20 | **充值无上限** | 可充任意大金额 | MAX_RECHARGE 上限校验 | 🟠 |
 | 21 | **内存数据不同步** | USERS 修改不写入 SQLite | 双数据源同步更新 | 🟠 |
 | 22 | **文件包含（LFI）** | 用户输入直接拼接入文件路径 | 白名单机制（仅允许预定义页面） | 🔴 |
+| 23 | **越权密码修改** | 任意登录用户可改他人密码 | session 身份校验（仅限修改自己） | 🔴 |
+| 24 | **无原密码验证** | 修改密码不需旧密码 | check_password_hash 验证原密码 | 🔴 |
+| 25 | **CSRF 跨站请求伪造** | 全站 POST 接口无 CSRF 防护 | CSRF Token + SameSite=Lax | 🔴 |
 
 ### SQL 注入防护
 
@@ -210,6 +215,45 @@ page_path = os.path.join("pages", f"{name}.html")  # 路径完全由服务端控
 修复前攻击者可通过 `../` 穿越、绝对路径绕过、URL编码绕过等方式读取服务器任意文件（源码、配置、系统文件），修复后白名单一刀切死所有绕过方式。
 
 
+### CSRF 跨站请求伪造防护
+
+全站 POST 接口实施 CSRF Token 防护，配合 SameSite Cookie 策略：
+
+```python
+# Flask 配置 SameSite Cookie（防止跨站自动携带）
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+
+# 自动为每个 session 生成 CSRF Token
+@app.before_request
+def ensure_csrf_token():
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_hex(32)
+
+# CSRF 验证装饰器
+def csrf_required(f):
+    @functools.wraps(f)
+    def decorated(*args, **kwargs):
+        token = request.form.get("csrf_token", "")
+        if not token or token != session.get("csrf_token", ""):
+            return "CSRF 验证失败", 403
+        return f(*args, **kwargs)
+    return decorated
+```
+
+模板中传入 Token：
+```html
+<input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+```
+
+覆盖范围：
+
+| POST 路由 | 防护方式 | 状态 |
+|:----------|:---------|:----|
+| `/change-password` | `@csrf_required` 装饰器 | ✅ |
+| `/recharge` | `@csrf_required` 装饰器 | ✅ |
+| `/upload` | 手工 Token 校验 | ✅ |
+
+
 ### 审计日志
 
 所有敏感操作均记录日志，格式如下：
@@ -229,6 +273,7 @@ page_path = os.path.join("pages", f"{name}.html")  # 路径完全由服务端控
 | 搜索 | 用户名、IP、关键词 |
 | 上传成功/拒绝 | 用户名、IP、文件名、拒绝原因 |
 | 充值 | 用户名、IP、目标 user_id、金额 |
+| 修改密码成功/失败 | 用户名、IP、操作详情 |
 
 ### 爆破防护配置
 

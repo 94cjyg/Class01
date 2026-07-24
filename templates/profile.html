@@ -44,12 +44,40 @@
 <div class="card">
     <h3>账户充值</h3>
     <form method="post" action="/recharge" class="recharge-form">
+        <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
         <input type="hidden" name="user_id" value="{{ user.id }}">
         <div class="form-group">
             <label for="amount">充值金额</label>
             <input type="number" id="amount" name="amount" step="1" placeholder="请输入充值金额" required>
         </div>
         <button type="submit" class="btn btn-primary">充 值</button>
+    </form>
+</div>
+
+{% if error %}
+<div class="card">
+    <div class="error-message">{{ error }}</div>
+</div>
+{% endif %}
+
+<div class="card">
+    <h3>修改密码</h3>
+    <form method="post" action="/change-password" class="change-pw-form">
+        <input type="hidden" name="csrf_token" value="{{ session.csrf_token }}">
+        <input type="hidden" name="username" value="{{ user.username }}">
+        <div class="form-group">
+            <label for="old_password">原密码</label>
+            <input type="password" id="old_password" name="old_password" placeholder="请输入原密码" required>
+        </div>
+        <div class="form-group">
+            <label for="new_password">新密码</label>
+            <input type="password" id="new_password" name="new_password" placeholder="请输入新密码" required>
+        </div>
+        <div class="form-group">
+            <label for="confirm_password">确认密码</label>
+            <input type="password" id="confirm_password" name="confirm_password" placeholder="请再次输入新密码" required>
+        </div>
+        <button type="submit" class="btn btn-primary">修改密码</button>
     </form>
 </div>
 
